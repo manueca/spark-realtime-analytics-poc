@@ -1,0 +1,73 @@
+import pandas as pd
+import numpy as np
+import random
+from datetime import datetime
+
+np.random.seed(42)
+
+# Define date range
+dates = pd.date_range(start="2024-01-01", end="2025-04-11", freq="D")
+
+# City definitions (California + Other cities)
+locations = [
+    ("Los Angeles", 34.05, -118.25),
+    ("San Diego", 32.72, -117.16),
+    ("San Jose", 37.33, -121.89),
+    ("San Francisco", 37.77, -122.42),
+    ("Fresno", 36.74, -119.78),
+    ("Sacramento", 38.58, -121.49),
+    ("New York", 40.67, -73.94),
+    ("Chicago", 41.84, -87.68),
+    ("Phoenix", 33.54, -112.07),
+    ("Philadelphia", 40.01, -75.13),
+    ("Austin", 30.51, -97.68),
+    ("Seattle", 47.62, -122.35)
+]
+
+# Trend logic
+cutoff = pd.Timestamp("2025-02-01")
+start_date = pd.Timestamp("2024-01-01")
+end_date = pd.Timestamp("2025-04-11")
+total_days = (end_date - start_date).days
+mid_point = (cutoff - start_date).days
+
+def trend_scale(date):
+    days_from_start = (date - start_date).days
+    if date < cutoff:
+        scale = 1 - (days_from_start / mid_point)
+    else:
+        scale = (days_from_start - mid_point) / (total_days - mid_point)
+    return max(0, min(1, scale))
+
+# Generate data
+rows = []
+for date in dates:
+    for city, lat, lon in locations:
+        for loan_type in ["auto", "home"]:
+            scale = trend_scale(date)
+            base_feeds = 500
+            max_feeds = 3500
+            count_feeds = int(base_feeds + scale * max_feeds)
+
+            auto_link_click = int(count_feeds * (0.3 if loan_type == "auto" else 0.1))
+            auto_submit = int(auto_link_click * 0.5)
+
+            home_link_click = int(count_feeds * (0.3 if loan_type == "home" else 0.1))
+            home_submit = int(home_link_click * 0.5)
+
+            rows.append({
+                "processing_date": date.strftime("%Y-%m-%d"),
+                "loan_type": loan_type,
+                "City_latitude": lat,
+                "City_longitude": lon,
+                "count_feeds": count_feeds,
+                "auto_loan_link_click_count": auto_link_click,
+                "auto_loan_submit_count": auto_submit,
+                "home_loan_link_click_count": home_link_click,
+                "home_loan_submit_count": home_submit
+            })
+
+# Create DataFrame and write to CSV
+df = pd.DataFrame(rows)
+df.to_csv("loan_metrics_trend_data.csv", index=False)
+print("✅ Data written to 'loan_metrics_trend_data.csv'")
