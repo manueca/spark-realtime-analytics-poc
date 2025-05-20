@@ -33,10 +33,10 @@ spark = SparkSession.builder \
 #spark.sparkContext.parallelize([1]).foreach(lambda _: install_textblob())
 
 # =====================
-# TWEET GENERATION MODULE
+# reddit GENERATION MODULE
 # =====================
 
-def generate_jpmc_tweet():
+def generate_jpmc_reddit():
     loan_products = {
         'auto': [
             "Chase auto loan rates looking competitive this quarter",
@@ -82,24 +82,24 @@ sentiment_udf = udf(analyze_sentiment, StructType([
 # STREAMING PIPELINE
 # =====================
 
-# 1. Generate simulated tweet stream
-tweets_df = spark.readStream \
+# 1. Generate simulated reddit stream
+reddits_df = spark.readStream \
     .format("rate") \
     .option("rowsPerSecond", 5) \
     .load() \
-    .withColumn("tweet", udf(generate_jpmc_tweet, StringType())()) \
+    .withColumn("reddit", udf(generate_jpmc_reddit, StringType())()) \
     .withColumn("processing_time", current_timestamp()) \
     .withColumn("date", to_date(col("processing_time"))) \
     .withColumn("hour", hour(col("processing_time")))
 
 # 2. Extract metadata and apply sentiment analysis
 """
-processed_tweets = tweets_df \
-    .withColumn("loan_type", regexp_extract(col("tweet"), "#(\\w+)loan", 1)) \
-    .withColumn("state", regexp_extract(col("tweet"), "#([A-Z]{2})", 1)) \
-    .withColumn("sentiment_data", sentiment_udf(col("tweet"))) \
+processed_reddits = reddits_df \
+    .withColumn("loan_type", regexp_extract(col("reddit"), "#(\\w+)loan", 1)) \
+    .withColumn("state", regexp_extract(col("reddit"), "#([A-Z]{2})", 1)) \
+    .withColumn("sentiment_data", sentiment_udf(col("reddit"))) \
     .select(
-        col("tweet"),
+        col("reddit"),
         col("loan_type"),
         col("state"),
         col("sentiment_data.sentiment").alias("sentiment"),
@@ -139,28 +139,28 @@ def get_random_coordinates():
     lat, lon = random_city_coordinates()
     return {"latitude": lat, "longitude": lon}
 
-processed_tweets = tweets_df \
-    .withColumn("loan_type", regexp_extract(col("tweet"), "#(\\w+)loan", 1)) \
-    .withColumn("state", regexp_extract(col("tweet"), "#([A-Z]{2})", 1)) \
+processed_reddits = reddits_df \
+    .withColumn("loan_type", regexp_extract(col("reddit"), "#(\\w+)loan", 1)) \
+    .withColumn("state", regexp_extract(col("reddit"), "#([A-Z]{2})", 1)) \
     .select(
-        col("tweet"),
+        col("reddit"),
         col("loan_type"),
         col("state"),
         col("processing_time"),
         col("date"),
         col("hour")
     )
-processed_tweets.registerTempTable("processed_tweets")
-processed_tweets=spark.sql("""select * from processed_tweets""")
-processed_tweets1=processed_tweets \
+processed_reddits.registerTempTable("processed_reddits")
+processed_reddits=spark.sql("""select * from processed_reddits""")
+processed_reddits1=processed_reddits \
     .withColumn("Sentiment",when(rand() > 0.5, "Positive").otherwise("Negative")) \
     .withColumn("Coordinates", get_random_coordinates()) 
-processed_tweets1.printSchema()
+processed_reddits1.printSchema()
 spark.read.format("delta").load("s3://j0c0vk5-streaming-demo/delta_tables/integrated_sentiment_2").printSchema()
-processed_tweets=processed_tweets1.withColumn("City_latitude", processed_tweets1["Coordinates"]["latitude"]) \
-    .withColumn("City_longitude", processed_tweets1["Coordinates"]["longitude"])  \
+processed_reddits=processed_reddits1.withColumn("City_latitude", processed_reddits1["Coordinates"]["latitude"]) \
+    .withColumn("City_longitude", processed_reddits1["Coordinates"]["longitude"])  \
     .drop("Coordinates")
-processed_tweets.printSchema()
+processed_reddits.printSchema()
 # =====================
 # DELTA TABLES OUTPUT
 # =====================
@@ -170,8 +170,8 @@ processed_tweets.printSchema()
 # 1. Integrated Sentiment Table (Partitioned by date/hour)
 integrated_sentiment_path = "s3://j0c0vk5-streaming-demo/delta_tables/integrated_sentiment_2"
 checkpoint_path_integrated = "s3://j0c0vk5-streaming-demo/checkpoints/integrated_sentiment_2"
-raw_tweets_path = "s3://j0c0vk5-streaming-demo/base/raw_tweets_2"
-processed_tweets.writeStream \
+raw_reddits_path = "s3://j0c0vk5-streaming-demo/base/raw_reddits_2"
+processed_reddits.writeStream \
     .format("delta") \
     .option("mergeSchema", "true") \
     .outputMode("append") \
@@ -184,10 +184,10 @@ state_metrics_path = "s3://j0c0vk5-streaming-demo/delta_tables/state_metrics_2"
 checkpoint_path_state = "s3://j0c0vk5-streaming-demo/checkpoints/state_metrics_2"
 
 # Create Delta tables if they don't exist
-if not DeltaTable.isDeltaTable(spark, raw_tweets_path):
-    # Schema for raw tweets
+if not DeltaTable.isDeltaTable(spark, raw_reddits_path):
+    # Schema for raw reddits
     raw_schema = StructType([
-        StructField("tweet", StringType()),
+        StructField("reddit", StringType()),
         StructField("loan_type", StringType()),
         StructField("state", StringType()),
         StructField("sentiment", StringType()),
@@ -199,7 +199,7 @@ if not DeltaTable.isDeltaTable(spark, raw_tweets_path):
         .write \
         .format("delta") \
         .partitionBy("date", "hour") \
-        .save(raw_tweets_path)
+        .save(raw_reddits_path)
 
 if not DeltaTable.isDeltaTable(spark, state_metrics_path):
     # Schema for state metrics
@@ -210,8 +210,8 @@ if not DeltaTable.isDeltaTable(spark, state_metrics_path):
         ])),
         StructField("date", DateType()),
         StructField("state", StringType()),
-        StructField("distinct_tweets", LongType()),
-        StructField("total_tweets", LongType()),
+        StructField("distinct_reddits", LongType()),
+        StructField("total_reddits", LongType()),
         StructField("positive_count", LongType()),
         StructField("negative_count", LongType()),
         StructField("sentiment_flag", StringType()),
@@ -223,17 +223,17 @@ if not DeltaTable.isDeltaTable(spark, state_metrics_path):
         .partitionBy("date", "state") \
         .save(state_metrics_path)
 
-# Write raw tweets to Delta
-raw_tweets_query = (processed_tweets.writeStream
+# Write raw reddits to Delta
+raw_reddits_query = (processed_reddits.writeStream
     .format("delta")
     .option("mergeSchema", "true") \
     .outputMode("append")
-    .option("checkpointLocation", f"{raw_tweets_path}/_checkpoints")
+    .option("checkpointLocation", f"{raw_reddits_path}/_checkpoints")
     .partitionBy("date", "hour")
-    .start(raw_tweets_path))
+    .start(raw_reddits_path))
 
 # Calculate state metrics
-state_metrics = processed_tweets \
+state_metrics = processed_reddits \
     .withWatermark("processing_time", "1 hour") \
     .groupBy(
         window(col("processing_time"), "1 hour").alias("time_window"),
@@ -241,8 +241,8 @@ state_metrics = processed_tweets \
         col("state")
     ) \
     .agg(
-        approx_count_distinct("tweet").alias("distinct_tweets"),
-        count(lit(1)).alias("total_tweets"),
+        approx_count_distinct("reddit").alias("distinct_reddits"),
+        count(lit(1)).alias("total_reddits"),
         sum(when(col("sentiment") == "positive", 1).otherwise(0)).alias("positive_count"),
         sum(when(col("sentiment") == "negative", 1).otherwise(0)).alias("negative_count")
     ) \
